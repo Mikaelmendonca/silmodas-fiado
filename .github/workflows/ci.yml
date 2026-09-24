@@ -22,6 +22,8 @@ jobs:
         run: |
           ruff check .
           ruff format --check .
+      - name: Tipagem (mypy --strict)
+        run: mypy
       - name: Testes (falha se cobertura < 95%)
         run: pytest --cov-report=xml
       - uses: actions/upload-artifact@v4

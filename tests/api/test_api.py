@@ -245,3 +245,47 @@ def test_scheduler_starts_and_stops_cleanly_with_the_app(clock, notifier):
     )  # schedule_alerts=True (padrão)
     with TestClient(app) as c:
         assert c.get("/health").status_code == 200
+
+
+class TestRegressionsFoundByBoundaryProbing:
+    """Bugs reais achados por teste de borda: todos devolviam 500 ou aceitavam absurdos."""
+
+    @pytest.mark.parametrize("cents", [2**63, 10**30])
+    def test_amount_beyond_sqlite_integer_is_422_not_500(self, client, cents):
+        res = client.post("/debts", json={"customer": "A", "amount_cents": cents, "term_days": 1})
+        assert res.status_code == 422 and "valor máximo" in res.json()["detail"]
+
+    def test_amount_limit_is_inclusive(self, client):
+        ok = client.post("/debts", json={"customer": "A", "amount_cents": 10**9, "term_days": 1})
+        too_much = client.post(
+            "/debts", json={"customer": "A", "amount_cents": 10**9 + 1, "term_days": 1}
+        )
+        assert (ok.status_code, too_much.status_code) == (201, 422)
+
+    @pytest.mark.parametrize("method", ["get", "delete"])
+    def test_absurd_debt_id_is_422_not_500(self, client, method):
+        res = getattr(client, method)("/debts/99999999999999999999999")
+        assert res.status_code == 422
+
+    def test_absurd_debt_id_on_payment_is_422(self, client):
+        res = client.post("/debts/2147483648999999999999/payments", json={"amount_cents": 1})
+        assert res.status_code == 422
+
+    @pytest.mark.parametrize("bad_id", [0, -1])
+    def test_non_positive_ids_are_422(self, client, bad_id):
+        assert client.get(f"/debts/{bad_id}").status_code == 422
+
+    def test_due_date_too_far_is_rejected_like_term_days(self, client):
+        res = client.post(
+            "/debts", json={"customer": "A", "amount_cents": 100, "due_date": "9999-12-31"}
+        )
+        assert res.status_code == 422 and "3650 dias" in res.json()["detail"]
+
+    def test_due_date_at_the_limit_is_accepted(self, client):
+        res = client.post("/debts", json={"customer": "A", "amount_cents": 100, "term_days": 3650})
+        assert res.status_code == 201
+        same = client.post(
+            "/debts",
+            json={"customer": "A", "amount_cents": 100, "due_date": res.json()["due_date"]},
+        )
+        assert same.status_code == 201

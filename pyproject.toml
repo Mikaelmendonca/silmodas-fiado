@@ -2,7 +2,20 @@
 name = "fiado"
 version = "0.1.0"
 description = "Silmodas: controle de fiado com alertas de vencimento no celular"
+readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Mikael Mendonça" }]
+keywords = ["fiado", "cobranca", "fastapi", "ntfy", "pytest", "qa"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: Portuguese (Brazilian)",
+]
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
@@ -12,7 +25,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5", "hypothesis>=6", "ruff>=0.4"]
+dev = ["pytest>=8", "pytest-cov>=5", "hypothesis>=6", "ruff>=0.4", "mypy>=1.10"]
+
+[project.urls]
+Repository = "https://github.com/Mikaelmendonca/silmodas-fiado"
+Issues = "https://github.com/Mikaelmendonca/silmodas-fiado/issues"
+
+[project.scripts]
+fiado = "fiado.__main__:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -38,3 +58,7 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+files = ["src"]
+strict = true

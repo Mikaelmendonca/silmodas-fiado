@@ -78,6 +78,7 @@ class Debt:
 
 
 MAX_TERM_DAYS = 3650
+MAX_AMOUNT_CENTS = 1_000_000_000  # R$ 10 milhões: acima disso é erro de digitação
 
 
 def resolve_due_date(*, due_date: date | None, term_days: int | None, today: date) -> date:
@@ -106,8 +107,14 @@ def new_debt(
         raise ValidationError("O nome do cliente é obrigatório.")
     if amount_cents <= 0:
         raise ValidationError("O valor deve ser maior que zero.")
+    if amount_cents > MAX_AMOUNT_CENTS:
+        raise ValidationError(f"O valor máximo é {format_brl(MAX_AMOUNT_CENTS)}.")
     if due_date < today:
         raise ValidationError("A data de vencimento não pode estar no passado.")
+    if due_date > today + timedelta(days=MAX_TERM_DAYS):
+        raise ValidationError(
+            f"O vencimento não pode passar de {MAX_TERM_DAYS} dias a partir de hoje."
+        )
     if phone is not None and phone.strip():
         phone = normalize_phone(phone)
     else:

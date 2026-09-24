@@ -1,6 +1,16 @@
 # 🧵 Silmodas · Fiado — controle de devedores com alertas no celular
 
-![Painel da Silmodas no celular](docs/prints/1-celular-claro.png)
+[![CI](https://github.com/Mikaelmendonca/silmodas-fiado/actions/workflows/ci.yml/badge.svg)](https://github.com/Mikaelmendonca/silmodas-fiado/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-e0457b)
+![Cobertura](https://img.shields.io/badge/cobertura-100%25-brightgreen)
+![Tipos](https://img.shields.io/badge/mypy-strict-blue)
+[![Licença: MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)](LICENSE)
+
+<p align="center">
+  <img src="docs/prints/1-celular-claro.png" width="300" alt="Painel da Silmodas no celular">
+  &nbsp;&nbsp;
+  <img src="docs/prints/3-celular-escuro.png" width="300" alt="Painel da Silmodas no modo escuro">
+</p>
 
 Sistema para a loja da minha mãe anotar quem comprou **fiado / a prazo** e **ser avisada no
 celular** quando o prazo está acabando:
@@ -88,7 +98,8 @@ linhas, sem tocar em regra de negócio.
 ## Estratégia de testes
 
 ```bash
-pytest                # 181 testes, ~2s, falha se cobertura < 95% (hoje 100%)
+make test             # 191 testes, ~2s, falha se cobertura < 95% (hoje 100%)
+make lint             # ruff + mypy --strict, o mesmo que o CI roda
 ```
 
 | Camada | Onde | O que valida |
@@ -98,7 +109,7 @@ pytest                # 181 testes, ~2s, falha se cobertura < 95% (hoje 100%)
 | Serviço | `tests/unit/test_service.py` | Alertas com banco em memória: sem duplicar, retentativa após falha, contagem regressiva dia a dia |
 | Infra | `test_notifier.py`, `test_settings_scheduling.py`, `test_cli.py` | Payload HTTP (mock), config inválida, agendador com relógio falso, CLI |
 | API | `tests/api/test_api.py` | Contrato HTTP, códigos 201/204/404/409/422/502, fluxo completo |
-| CI | `.github/workflows/ci.yml` | Lint + testes em Python 3.11 / 3.12 / 3.13 |
+| CI | `.github/workflows/ci.yml` | Lint, `mypy --strict` e testes em Python 3.11 / 3.12 / 3.13 |
 
 ### Decisões de projeto que tornam o sistema testável
 
@@ -128,12 +139,24 @@ pytest                # 181 testes, ~2s, falha se cobertura < 95% (hoje 100%)
 - **Teste de estado e de falha**: pagar a mais deixa o saldo intacto; entrega que falha é retentada
 - **Fluxo ponta a ponta** simulando a passagem dos dias
 
-### Bug real encontrado pelos próprios testes
+### Bugs reais encontrados por testes
 
-Um teste de telefone internacional (`+1 415 555 0100`) falhou: os 11 dígitos pareciam
+**1. Telefone internacional aceito como brasileiro.** Um teste de telefone internacional (`+1 415 555 0100`) falhou: os 11 dígitos pareciam
 "DDD + celular", e o sistema aceitava um número dos EUA como brasileiro, prefixando `55`. A
 validação agora exige DDD válido, 9 iniciando em 9 para celular, 2–5 para fixo, e recusa `+` com
 DDI diferente de 55. Os casos ficaram como testes de regressão.
+
+**2. Entradas gigantes derrubavam a API (HTTP 500).** Sondando as bordas da API descobri que
+`amount_cents = 2**63` e `GET /debts/99999999999999999999999` estouravam o inteiro de 64 bits do
+SQLite e retornavam erro interno, enquanto um valor de R$ 46 quatrilhões era aceito. Agora há um
+teto de valor (R$ 10 milhões) e o `id` é validado (`1 ≤ id < 2**63`), com erro 422 claro.
+
+**3. Regras inconsistentes para data.** O prazo em dias era limitado a 10 anos, mas o vencimento
+digitado como data (`9999-12-31`) não era. Agora as duas formas seguem o mesmo limite.
+
+Os testes dessas correções estão em `TestRegressionsFoundByBoundaryProbing` e, conferido à mão,
+**falham sem a correção** (9 vermelhos ao desfazer o código; o décimo é o teste do limite
+exato, que corretamente passa nos dois casos).
 
 ## Próximos passos
 
@@ -143,6 +166,19 @@ DDI diferente de 55. Os casos ficaram como testes de regressão.
 - [ ] Segundo canal de alerta (Telegram / e-mail) — basta implementar `Notifier`
 - [ ] Resumo diário único ("3 vencem hoje, total R$ 850") quando houver muitos devedores
 
+## Contribuindo
+
+```bash
+make install && source .venv/bin/activate
+make lint && make test
+```
+
+Ao corrigir um bug, adicione um teste que **falhe sem a correção**. O template de PR lembra disso.
+
+## Licença
+
+[MIT](LICENSE)
+
 ## Stack
 
-Python 3.11+ · FastAPI · SQLite · ntfy (push) · pytest · Hypothesis · Ruff · GitHub Actions
+Python 3.11+ · FastAPI · SQLite · ntfy (push) · pytest · Hypothesis · Ruff · mypy · GitHub Actions · Dependabot

@@ -9,9 +9,11 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -31,6 +33,8 @@ from fiado.service import DebtService
 from fiado.settings import Settings
 
 STATIC_DIR = Path(__file__).parent / "static"
+# SQLite guarda inteiros de até 64 bits: um id maior nunca existe (antes causava erro 500).
+DebtId = Annotated[int, PathParam(ge=1, le=2**63 - 1)]
 log = logging.getLogger(__name__)
 
 
@@ -150,15 +154,15 @@ def create_app(
         return [_out(d, t) for d in service.list_debts(status)]
 
     @app.get("/debts/{debt_id}", response_model=DebtOut)
-    def get_debt(debt_id: int) -> DebtOut:
+    def get_debt(debt_id: DebtId) -> DebtOut:
         return _out(service.get(debt_id), service.today())
 
     @app.post("/debts/{debt_id}/payments", response_model=DebtOut)
-    def pay_debt(debt_id: int, body: PaymentIn) -> DebtOut:
+    def pay_debt(debt_id: DebtId, body: PaymentIn) -> DebtOut:
         return _out(service.pay(debt_id, body.amount_cents), service.today())
 
     @app.delete("/debts/{debt_id}", status_code=204)
-    def delete_debt(debt_id: int) -> None:
+    def delete_debt(debt_id: DebtId) -> None:
         service.delete(debt_id)
 
     @app.get("/reminders", response_model=list[DebtOut])
