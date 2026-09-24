@@ -23,22 +23,50 @@ Nasceu de um problema real e também é um **projeto de portfólio**: o foco nã
 
 ## O que ele faz
 
-- Anota o fiado com **valor**, **prazo (dias)** e **vencimento** — preencher um calcula o outro
-- **Notificação push no celular** todo dia no horário escolhido (padrão 08:00):
-  3 dias antes, 1 dia antes, **no dia** e **todo dia enquanto estiver atrasado**
+**Para quem toca a loja**
+- Anota o fiado com **cliente, telefone, o que levou, valor, prazo (dias) e vencimento** — preencher
+  o prazo calcula o vencimento e vice-versa. O valor aceita `300`, `300,00`, `1.250,50`, `1250.50`
+  e `R$ 300`
+- **Resumo** no topo: total a receber, total atrasado e quantos vencem hoje
+- Painel **"Cobrar agora"** (vencem hoje e atrasados, do mais atrasado ao menos) e lista completa
+  com etiquetas *No prazo · Vence hoje · Atrasado (Nd) · Pago*
+- **Pagamentos parciais** com saldo e barra de progresso; não deixa pagar mais que o devido
+- Botão **Cobrar no WhatsApp** com mensagem educada pronta (diferente para atrasado e a vencer)
+- Visual rosa no estilo Apple, claro e escuro automáticos, responsivo, e **instalável na tela
+  inicial** do celular
+
+**Alertas no celular**
+- **Notificação push** todo dia no horário escolhido (padrão 08:00), 3 dias antes, 1 dia antes,
+  **no dia** e **todo dia enquanto estiver atrasado**
+- A mensagem mostra o **saldo que falta**, não o valor original; quem quitou não é avisado
 - Nunca avisa duas vezes a mesma coisa no mesmo dia, mesmo que o app reinicie
 - Se o computador estava desligado às 8h, **recupera o alerta assim que ligar**
-- Pagamentos parciais: a mensagem mostra o **saldo que falta**, não o valor original
-- Painel **"Cobrar agora"** e botão **Cobrar no WhatsApp** com mensagem educada pronta
 - Botões "Testar no celular" e "Enviar alertas de hoje"
-- **Pronto para uso real:** liga sozinho com o Mac, **abre no celular com senha**, vira um ícone
-  na tela inicial e faz **backup diário** do banco (últimos 30 dias)
+
+**Pronto para uso real**
+- **Liga sozinho** com o Mac (instalador de 1 comando) e **abre no celular com senha**
+- **Backup diário** do banco, guardando os últimos 30 dias
+- Configuração por `.env`, validada; o "hoje" segue o fuso da loja
+
+### Comandos e API
+
+| Comando | O que faz |
+|---|---|
+| `python -m fiado` | Painel + alertas diários (padrão) |
+| `python -m fiado alerts` | Envia os alertas de hoje e sai (bom para `cron`) |
+| `python -m fiado test` | Manda uma notificação de teste |
+| `python -m fiado seed` | Cria dados de exemplo |
+| `python -m fiado backup` | Salva uma cópia do banco |
+
+API em `/docs` (Swagger): `POST/GET /debts`, `GET/DELETE /debts/{id}`, `POST /debts/{id}/payments`,
+`GET /reminders`, `GET /summary`, `GET /alerts/status`, `POST /alerts/run`, `POST /alerts/test`,
+`GET /health`.
 
 ## Rodando
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e .          # para desenvolver e testar: pip install -e ".[dev]"
 python -m fiado seed      # (opcional) dados de exemplo para ver o painel cheio
 python -m fiado           # abra http://localhost:8000
 ```
@@ -73,9 +101,10 @@ Para privacidade total dá para hospedar o próprio servidor ntfy (`FIADO_NTFY_S
 
 ### Deixando rodando todo dia
 
-O alerta sai de dentro do próprio app enquanto ele estiver aberto (`python -m fiado`). Se preferir
-não deixar o app aberto, agende o comando abaixo no `cron` / Agendador de Tarefas; como ele é
-idempotente, rodar mais de uma vez por dia é seguro:
+No Mac, o [instalador](#instalando-na-loja-mac--1-comando) já deixa tudo rodando sozinho. Sem ele,
+o alerta sai de dentro do app enquanto estiver aberto (`python -m fiado`). Se preferir não deixá-lo
+aberto, agende o comando abaixo no `cron` / Agendador de Tarefas; como ele é idempotente, rodar
+mais de uma vez por dia é seguro:
 
 ```bash
 python -m fiado alerts     # envia os alertas de hoje e sai
@@ -128,9 +157,9 @@ make lint             # ruff + mypy --strict, o mesmo que o CI roda
 | Unitário | `tests/unit/test_domain.py`, `test_alerts.py` | Regras puras: status por data, atraso, pagamento, prazo, texto exato das mensagens |
 | Propriedades | `test_domain.py` (Hypothesis) | Invariantes para *qualquer* entrada: `pago + restante == total`, nunca paga a mais |
 | Serviço | `tests/unit/test_service.py` | Alertas com banco em memória: sem duplicar, retentativa após falha, contagem regressiva dia a dia |
-| Infra | `test_notifier.py`, `test_settings_scheduling.py`, `test_cli.py` | Payload HTTP (mock), config inválida, agendador com relógio falso, CLI |
-| API | `tests/api/test_api.py` | Contrato HTTP, códigos 201/204/404/409/422/502, fluxo completo |
-| E2E | `tests/e2e/test_painel.py` | Jornadas da usuária num Chrome de verdade: anotar, prazo↔vencimento, pagar, apagar, alertas, XSS, layout do celular |
+| Infra | `test_notifier.py`, `test_settings_scheduling.py`, `test_backup.py`, `test_cli.py` | Payload HTTP (mock), config inválida, agendador com relógio falso, backup (rotação, atomicidade), CLI |
+| API | `tests/api/test_api.py` | Contrato HTTP, códigos 201/204/401/404/409/422/502, senha (credenciais malformadas, acentos), manifest do app, backup no job diário |
+| E2E | `tests/e2e/test_painel.py` | Jornadas da usuária num Chrome de verdade: anotar, prazo↔vencimento, pagar, apagar, alertas, senha do painel, XSS, layout do celular |
 | CI | `.github/workflows/ci.yml` | Lint, `mypy --strict` e testes em 3.11 / 3.12 / 3.13; job separado de E2E com screenshot e trace nas falhas |
 
 ### Decisões de projeto que tornam o sistema testável
@@ -205,12 +234,6 @@ Os testes das correções 2 e 3 estão em `TestRegressionsFoundByBoundaryProbing
 **falham sem a correção** (9 vermelhos ao desfazer o código; o décimo é o teste do limite
 exato, que corretamente passa nos dois casos).
 
-## Próximos passos
-
-- [ ] Teste de mutação (`mutmut`) para medir a qualidade dos testes, não só a cobertura
-- [ ] Segundo canal de alerta (Telegram / e-mail) — basta implementar `Notifier`
-- [ ] Resumo diário único ("3 vencem hoje, total R$ 850") quando houver muitos devedores
-
 ## Contribuindo
 
 ```bash
@@ -223,7 +246,3 @@ Ao corrigir um bug, adicione um teste que **falhe sem a correção**. O template
 ## Licença
 
 [MIT](LICENSE)
-
-## Stack
-
-Python 3.11+ · FastAPI · SQLite · ntfy (push) · pytest · Hypothesis · Ruff · mypy · GitHub Actions · Dependabot
