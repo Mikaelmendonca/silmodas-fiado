@@ -26,7 +26,7 @@ jobs:
         run: mypy
       - name: Testes (falha se cobertura < 95%)
         run: pytest --cov-report=xml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.python-version == '3.13'
         with:
           name: coverage
@@ -47,7 +47,7 @@ jobs:
         run: pytest tests/e2e -m e2e --no-cov --screenshot only-on-failure --tracing retain-on-failure --output test-results
       - name: Evidências da falha (screenshot e trace)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-falha
           path: test-results
