@@ -83,6 +83,7 @@
     button:active, a.btn:active { transform:scale(.97); }
     button.ghost, a.btn { background:var(--accent-soft); color:var(--accent-ink); }
     button.ghost:hover, a.btn:hover { background:var(--accent-soft); opacity:.8; }
+    button:disabled { opacity:.55; cursor:progress; transform:none; }
     button.danger { background:transparent; color:var(--muted); padding:0 12px; }
     button.danger:hover { background:var(--red-soft); color:var(--red); }
     :focus-visible { outline:3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset:2px; }
@@ -200,9 +201,15 @@ async function api(path, opts = {}) {
   return data;
 }
 
-// Converte "12,50" ou "1.250,00" em centavos, sem usar float para o valor final.
+// Converte o que a pessoa digitou em centavos, sem usar float para o valor final.
+// Aceita "1.250,50", "1250,50", "1250.50" (ponto decimal do teclado do celular),
+// "R$ 300" e "1.250" (ponto + 3 dígitos = milhar, como no Brasil).
 function parseCents(text) {
-  const clean = text.trim().replace(/\./g, "").replace(",", ".");
+  const t = text.trim().replace(/^R\$\s*/i, "").replace(/\s/g, "");
+  let clean;
+  if (t.includes(",")) clean = t.replace(/\./g, "").replace(",", ".");
+  else if (/^\d{1,3}(\.\d{3})+$/.test(t)) clean = t.replace(/\./g, "");
+  else clean = t;
   if (!/^\d+(\.\d{1,2})?$/.test(clean)) return null;
   const [r, c = ""] = clean.split(".");
   return parseInt(r, 10) * 100 + parseInt(c.padEnd(2, "0"), 10);
@@ -325,15 +332,20 @@ async function remove(d) {
 
 $("#new-debt").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const f = new FormData(ev.target);
+  const form = ev.target;
+  const submit = form.querySelector('button[type="submit"]');
+  if (submit.disabled) return; // já está enviando: clique duplo não cria fiado duplicado
+  const f = new FormData(form);
   const cents = parseCents(f.get("amount"));
   if (cents === null) return flash("Valor inválido. Use o formato 12,50.", "err");
+  submit.disabled = true;
   try {
     await api("/debts", { method: "POST", body: JSON.stringify({
       customer: f.get("customer"), phone: f.get("phone") || null,
       description: f.get("description"), amount_cents: cents, due_date: f.get("due_date") }) });
-    ev.target.reset(); flash("Fiado anotado!", "ok"); await refresh();
+    form.reset(); flash("Fiado anotado!", "ok"); await refresh();
   } catch (e) { flash(e.message, "err"); }
+  finally { submit.disabled = false; }
 });
 
 refresh().catch((e) => flash(e.message, "err"));

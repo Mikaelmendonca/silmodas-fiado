@@ -4,6 +4,7 @@
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-e0457b)
 ![Cobertura](https://img.shields.io/badge/cobertura-100%25-brightgreen)
 ![Tipos](https://img.shields.io/badge/mypy-strict-blue)
+![E2E](https://img.shields.io/badge/E2E-Playwright-45ba4b)
 [![Licença: MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-lightgrey)](LICENSE)
 
 <p align="center">
@@ -99,6 +100,7 @@ linhas, sem tocar em regra de negócio.
 
 ```bash
 make test             # 191 testes, ~2s, falha se cobertura < 95% (hoje 100%)
+make e2e              # 29 testes no navegador (Playwright), ~20s
 make lint             # ruff + mypy --strict, o mesmo que o CI roda
 ```
 
@@ -109,7 +111,8 @@ make lint             # ruff + mypy --strict, o mesmo que o CI roda
 | Serviço | `tests/unit/test_service.py` | Alertas com banco em memória: sem duplicar, retentativa após falha, contagem regressiva dia a dia |
 | Infra | `test_notifier.py`, `test_settings_scheduling.py`, `test_cli.py` | Payload HTTP (mock), config inválida, agendador com relógio falso, CLI |
 | API | `tests/api/test_api.py` | Contrato HTTP, códigos 201/204/404/409/422/502, fluxo completo |
-| CI | `.github/workflows/ci.yml` | Lint, `mypy --strict` e testes em Python 3.11 / 3.12 / 3.13 |
+| E2E | `tests/e2e/test_painel.py` | Jornadas da usuária num Chrome de verdade: anotar, prazo↔vencimento, pagar, apagar, alertas, XSS, layout do celular |
+| CI | `.github/workflows/ci.yml` | Lint, `mypy --strict` e testes em 3.11 / 3.12 / 3.13; job separado de E2E com screenshot e trace nas falhas |
 
 ### Decisões de projeto que tornam o sistema testável
 
@@ -139,6 +142,23 @@ make lint             # ruff + mypy --strict, o mesmo que o CI roda
 - **Teste de estado e de falha**: pagar a mais deixa o saldo intacto; entrega que falha é retentada
 - **Fluxo ponta a ponta** simulando a passagem dos dias
 
+### Testes ponta a ponta (Playwright)
+
+Cada teste sobe **o sistema de verdade** (uvicorn numa thread, banco em memória e um celular
+falso) e dirige um navegador real. Assim o teste "Enviar alertas de hoje" prova o caminho
+completo: clique → JavaScript → API → banco → notificação
+*"Prazo de Bruno finaliza hoje. Está devendo R$ 300,00."* — e que o segundo clique **não repete**.
+
+```bash
+pip install -e ".[dev]"
+playwright install chromium          # uma vez (ou use o Chrome que você já tem:)
+make e2e                             # ou: make e2e ARGS="--browser-channel chrome"
+```
+
+Decisões: um servidor **por teste** (isolamento total), fuso e idioma do navegador iguais aos do
+servidor (sem teste que quebra à meia-noite), seletores por `data-testid` e papel/rótulo
+(acessíveis, não CSS frágil) e esperas por estado (`expect`), nunca `sleep`.
+
 ### Bugs reais encontrados por testes
 
 **1. Telefone internacional aceito como brasileiro.** Um teste de telefone internacional (`+1 415 555 0100`) falhou: os 11 dígitos pareciam
@@ -154,14 +174,21 @@ teto de valor (R$ 10 milhões) e o `id` é validado (`1 ≤ id < 2**63`), com er
 **3. Regras inconsistentes para data.** O prazo em dias era limitado a 10 anos, mas o vencimento
 digitado como data (`9999-12-31`) não era. Agora as duas formas seguem o mesmo limite.
 
-Os testes dessas correções estão em `TestRegressionsFoundByBoundaryProbing` e, conferido à mão,
+**4. Valor digitado com ponto virava 100x mais (E2E).** Digitar `1250.50` no celular (ponto como
+decimal) gravava **R$ 125.050,00**, porque o parser tratava todo ponto como separador de milhar.
+`R$ 1.250,50` colado com o símbolo também era recusado. Corrigido com casos para os 8 formatos
+(`test_formatos_de_valor_digitados`).
+
+**5. Clique duplo criava fiado duplicado (E2E).** O botão continuava ativo durante o envio; dois
+cliques rápidos geravam dois registros. Agora o botão desativa enquanto envia.
+
+Os testes das correções 2 e 3 estão em `TestRegressionsFoundByBoundaryProbing` e, conferido à mão,
 **falham sem a correção** (9 vermelhos ao desfazer o código; o décimo é o teste do limite
 exato, que corretamente passa nos dois casos).
 
 ## Próximos passos
 
 - [ ] Autenticação no painel, caso seja exposto fora da rede local
-- [ ] Testes E2E de navegador com Playwright (a UI já tem `data-testid`)
 - [ ] Teste de mutação (`mutmut`) para medir a qualidade dos testes, não só a cobertura
 - [ ] Segundo canal de alerta (Telegram / e-mail) — basta implementar `Notifier`
 - [ ] Resumo diário único ("3 vencem hoje, total R$ 850") quando houver muitos devedores

@@ -31,3 +31,23 @@ jobs:
         with:
           name: coverage
           path: coverage.xml
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: playwright install --with-deps chromium
+      - name: Testes ponta a ponta no navegador
+        run: pytest tests/e2e -m e2e --no-cov --screenshot only-on-failure --tracing retain-on-failure --output test-results
+      - name: Evidências da falha (screenshot e trace)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-falha
+          path: test-results

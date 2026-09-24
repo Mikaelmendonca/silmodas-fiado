@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5", "hypothesis>=6", "ruff>=0.4", "mypy>=1.10"]
+dev = ["pytest>=8", "pytest-cov>=5", "hypothesis>=6", "ruff>=0.4", "mypy>=1.10", "pytest-playwright>=0.5"]
 
 [project.urls]
 Repository = "https://github.com/Mikaelmendonca/silmodas-fiado"
@@ -46,10 +46,12 @@ fiado = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --cov=fiado --cov-report=term-missing --cov-fail-under=95"
+# E2E (navegador real) ficam de fora do `pytest` padrão: rode com `make e2e`.
+addopts = "-ra --strict-markers -m 'not e2e' --cov=fiado --cov-report=term-missing --cov-fail-under=95"
 markers = [
     "unit: testes rápidos de regra de negócio",
     "api: testes de contrato/fluxo da API HTTP",
+    "e2e: testes ponta a ponta no navegador (Playwright)",
 ]
 
 [tool.ruff]
