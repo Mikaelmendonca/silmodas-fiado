@@ -1,5 +1,7 @@
 # 🧵 Silmodas · Fiado — controle de devedores com alertas no celular
 
+![Painel da Silmodas no celular](docs/prints/1-celular-claro.png)
+
 Sistema para a loja da minha mãe anotar quem comprou **fiado / a prazo** e **ser avisada no
 celular** quando o prazo está acabando:
 
