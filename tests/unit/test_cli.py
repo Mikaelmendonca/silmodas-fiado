@@ -69,3 +69,48 @@ def test_serve_prints_banner_and_starts_uvicorn(env, monkeypatch, capsys, topic)
     assert cli.main(["serve", "--port", "9999"]) == 0
     assert started["port"] == 9999 and started["host"] == "127.0.0.1" and started["factory"]
     assert ("ligados" if topic else "DESLIGADOS") in capsys.readouterr().out
+
+
+def test_backup_command_saves_a_copy(env, monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("FIADO_BACKUP_DIR", str(tmp_path / "copias"))
+    cli.main(["seed"])
+    assert cli.main(["backup"]) == 0
+    saved = list((tmp_path / "copias").glob("fiado-*.db"))
+    assert len(saved) == 1 and "Backup salvo em" in capsys.readouterr().out
+
+
+def test_serve_refuses_to_open_to_the_network_without_password(env, monkeypatch, capsys):
+    monkeypatch.delenv("FIADO_PASSWORD", raising=False)
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **kw: pytest.fail("não deveria subir"))
+    assert cli.main(["serve", "--host", "0.0.0.0"]) == 2
+    assert "FIADO_PASSWORD" in capsys.readouterr().out
+
+
+def test_serve_on_the_network_with_password_shows_the_phone_address(env, monkeypatch, capsys):
+    monkeypatch.setenv("FIADO_PASSWORD", "segredo1")
+    monkeypatch.setattr(cli, "_lan_ip", lambda: "192.168.0.15")
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **kw: None)
+    assert cli.main(["serve", "--host", "0.0.0.0", "--port", "8123"]) == 0
+    out = capsys.readouterr().out
+    assert "http://192.168.0.15:8123" in out and "segredo1" not in out
+
+
+def test_serve_only_on_this_computer_needs_no_password(env, monkeypatch, capsys):
+    monkeypatch.delenv("FIADO_PASSWORD", raising=False)
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **kw: None)
+    assert cli.main(["serve"]) == 0
+    assert "192." not in capsys.readouterr().out  # não anuncia endereço de rede
+
+
+def test_lan_ip_returns_an_address_or_none_and_never_raises(monkeypatch):
+    assert cli._lan_ip() is None or cli._lan_ip().count(".") == 3
+
+    class Broken:
+        def __enter__(self):
+            raise OSError("sem rede")
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(cli.socket, "socket", lambda *a, **kw: Broken())
+    assert cli._lan_ip() is None

@@ -289,3 +289,151 @@ class TestRegressionsFoundByBoundaryProbing:
             json={"customer": "A", "amount_cents": 100, "due_date": res.json()["due_date"]},
         )
         assert same.status_code == 201
+
+
+class TestPasswordProtection:
+    @pytest.fixture
+    def protected(self, clock, notifier):
+        from fastapi.testclient import TestClient
+
+        from fiado.api import create_app
+        from fiado.settings import Settings
+
+        app = create_app(
+            db_path=":memory:",
+            today=clock,
+            settings=Settings(password="segredo1"),
+            notifier=notifier,
+            schedule_alerts=False,
+        )
+        with TestClient(app) as c:
+            yield c
+
+    def test_without_password_everything_is_locked(self, protected):
+        for path in ("/", "/debts", "/summary", "/alerts/status", "/docs"):
+            res = protected.get(path)
+            assert res.status_code == 401, path
+            assert "Basic" in res.headers["www-authenticate"]
+
+    def test_writes_are_locked_too(self, protected):
+        res = protected.post("/debts", json={"customer": "A", "amount_cents": 1, "term_days": 1})
+        assert res.status_code == 401
+        assert protected.post("/alerts/run").status_code == 401
+
+    def test_right_password_unlocks_with_any_username(self, protected):
+        assert protected.get("/debts", auth=("mae", "segredo1")).status_code == 200
+        assert protected.get("/debts", auth=("", "segredo1")).status_code == 200
+
+    @pytest.mark.parametrize("wrong", ["", "segredo", "SEGREDO1", "segredo1 ", "outra"])
+    def test_wrong_password_is_rejected(self, protected, wrong):
+        assert protected.get("/debts", auth=("mae", wrong)).status_code == 401
+
+    @pytest.mark.parametrize(
+        "header", ["Bearer segredo1", "Basic", "Basic !!!", "Basic c2VncmVkbzE=", "basic"]
+    )
+    def test_malformed_credentials_are_rejected_not_crashing(self, protected, header):
+        # "c2VncmVkbzE=" é "segredo1" sem o "usuario:" na frente
+        assert protected.get("/debts", headers={"Authorization": header}).status_code == 401
+
+    def test_non_utf8_credentials_are_rejected_not_500(self, protected):
+        import base64
+
+        bad = base64.b64encode(b"u:\xff\xfe").decode()
+        assert protected.get("/debts", headers={"Authorization": f"Basic {bad}"}).status_code == 401
+
+    def test_password_with_accents_works(self, clock, notifier):
+        from fastapi.testclient import TestClient
+
+        from fiado.api import create_app
+        from fiado.settings import Settings
+
+        app = create_app(
+            db_path=":memory:",
+            today=clock,
+            settings=Settings(password="açaí-123"),
+            notifier=notifier,
+            schedule_alerts=False,
+        )
+        with TestClient(app) as c:
+            assert c.get("/debts", auth=("x", "açaí-123")).status_code == 200
+
+    def test_health_and_app_icons_stay_public(self, protected):
+        for path in ("/health", "/manifest.webmanifest", "/icon-180.png", "/icon-512.png"):
+            assert protected.get(path).status_code == 200, path
+
+    def test_no_password_configured_means_open(self, client):
+        assert client.get("/debts").status_code == 200
+
+
+class TestInstallableApp:
+    def test_manifest_makes_it_installable_on_the_phone_home_screen(self, client):
+        res = client.get("/manifest.webmanifest")
+        body = res.json()
+        assert res.headers["content-type"].startswith("application/manifest+json")
+        assert body["display"] == "standalone" and body["short_name"] == "Silmodas"
+        assert {i["sizes"] for i in body["icons"]} == {"180x180", "512x512"}
+
+    @pytest.mark.parametrize("size", [180, 512])
+    def test_icons_are_real_pngs(self, client, size):
+        res = client.get(f"/icon-{size}.png")
+        assert res.status_code == 200 and res.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_unknown_icon_size_is_404(self, client):
+        assert client.get("/icon-999.png").status_code == 404
+
+    def test_page_links_the_manifest_and_icon(self, client):
+        html = client.get("/").text
+        assert 'rel="manifest"' in html and 'rel="apple-touch-icon"' in html
+
+
+def test_daily_job_saves_a_backup_of_the_real_database(tmp_path, clock, notifier):
+    """O job diário (agendador) também guarda uma cópia do banco."""
+    import time as time_module
+    from datetime import time
+
+    from fastapi.testclient import TestClient
+
+    from fiado.api import create_app
+    from fiado.settings import Settings
+
+    backups = tmp_path / "copias"
+    app = create_app(
+        db_path=str(tmp_path / "loja.db"),
+        today=clock,
+        # 00:00: já passou do horário, então o job roda na hora ao iniciar (recuperação)
+        settings=Settings(alert_time=time(0, 0), backup_dir=str(backups)),
+        notifier=notifier,
+    )
+    with TestClient(app):
+        deadline = time_module.monotonic() + 5
+        while not list(backups.glob("fiado-*.db")) and time_module.monotonic() < deadline:
+            time_module.sleep(0.05)
+    assert [f.name for f in backups.glob("fiado-*.db")] == ["fiado-2026-03-15.db"]
+
+
+def test_backup_failure_never_blocks_the_alerts(tmp_path, clock, notifier, caplog):
+    """Se a pasta de backup for inválida, o alerta do dia sai igual e o app segue de pé."""
+    import time as time_module
+    from datetime import time
+
+    from fastapi.testclient import TestClient
+
+    from fiado.api import create_app
+    from fiado.settings import Settings
+
+    arquivo = tmp_path / "eu-sou-um-arquivo"
+    arquivo.write_text("x")  # não dá para criar uma pasta "dentro" de um arquivo
+    app = create_app(
+        db_path=str(tmp_path / "loja.db"),
+        today=clock,
+        settings=Settings(alert_time=time(0, 0), backup_dir=str(arquivo / "copias")),
+        notifier=notifier,
+    )
+    with caplog.at_level("ERROR"), TestClient(app) as c:
+        c.post("/debts", json={"customer": "Bruno", "amount_cents": 30000, "term_days": 0})
+        deadline = time_module.monotonic() + 5
+        while "Falha ao salvar o backup" not in caplog.text and time_module.monotonic() < deadline:
+            time_module.sleep(0.05)
+        assert "Falha ao salvar o backup" in caplog.text
+        assert c.get("/health").status_code == 200  # o app continua no ar
+        assert c.post("/alerts/run").json()["sent"] == 1  # e os alertas continuam saindo

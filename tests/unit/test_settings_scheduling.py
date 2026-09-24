@@ -38,6 +38,15 @@ class TestSettings:
         assert s.warn_days == (5, 3, 1)
         assert s.timezone == "UTC"
 
+    def test_password_and_backup_folder(self):
+        s = Settings.from_env({"FIADO_PASSWORD": "  segredo1 ", "FIADO_BACKUP_DIR": "/tmp/b"})
+        assert s.password == "segredo1" and s.backup_dir == "/tmp/b"
+        assert Settings.from_env({}).password is None
+        assert Settings.from_env({"FIADO_PASSWORD": "  "}).password is None
+
+    def test_password_never_shows_up_in_repr_or_logs(self):
+        assert "segredo1" not in repr(Settings(password="segredo1"))
+
     def test_blank_topic_means_disabled(self):
         assert Settings.from_env({"FIADO_NTFY_TOPIC": "   "}).ntfy_topic is None
 

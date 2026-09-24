@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
@@ -19,6 +19,9 @@ class Settings:
     alert_time: time = time(8, 0)  # hora do envio diário
     warn_days: tuple[int, ...] = (3, 1)  # avisa quando faltam 3 e 1 dias, além de "hoje"
     timezone: str = "America/Sao_Paulo"
+    # Senha do painel (obrigatória para abrir fora deste computador). repr=False: não vaza em logs.
+    password: str | None = field(default=None, repr=False)
+    backup_dir: str = "backups"
 
     @property
     def push_enabled(self) -> bool:
@@ -41,6 +44,8 @@ class Settings:
             alert_time=_parse_time(env.get("FIADO_ALERT_TIME") or "08:00"),
             warn_days=_parse_days(env.get("FIADO_WARN_DAYS", "3,1")),
             timezone=_parse_timezone(env.get("FIADO_TZ") or defaults.timezone),
+            password=(env.get("FIADO_PASSWORD") or "").strip() or None,
+            backup_dir=env.get("FIADO_BACKUP_DIR") or defaults.backup_dir,
         )
 
 

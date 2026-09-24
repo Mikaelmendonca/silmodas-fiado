@@ -296,3 +296,33 @@ def test_data_de_hoje_do_servidor_bate_com_a_do_navegador(painel: Page):
     anotar(painel, "Bruno", "10,00", prazo=0)
     card = painel.get_by_test_id("all-debts").get_by_test_id("debt-card")
     expect(card).to_contain_text(f"vence {hoje():%d/%m/%Y}")
+
+
+# --- Senha do painel (necessária para abrir no celular) ----------------------------------------
+
+
+def test_painel_protegido_pede_senha_e_funciona_inteiro_depois_de_autenticar(
+    browser, live_server_protected: str
+):
+    # Sem senha o Chrome nem abre a página; pelo cliente HTTP do Playwright vemos o 401.
+    sem_senha = browser.new_context()
+    assert sem_senha.request.get(live_server_protected).status == 401
+    sem_senha.close()
+
+    com_senha = browser.new_context(
+        http_credentials={"username": "mae", "password": "segredo1"},
+        locale="pt-BR",
+        timezone_id="America/Sao_Paulo",
+    )
+    page = com_senha.new_page()
+    page.goto(live_server_protected)
+    expect(page.get_by_test_id("alert-status")).to_contain_text("ligados")
+    anotar(page, "Bruno", "300,00", prazo=0)  # o JavaScript reaproveita a senha nas chamadas à API
+    expect(page.get_by_test_id("total-open")).to_have_text("R$ 300,00")
+    com_senha.close()
+
+
+def test_senha_errada_nao_entra(browser, live_server_protected: str):
+    contexto = browser.new_context(http_credentials={"username": "mae", "password": "errada"})
+    assert contexto.request.get(live_server_protected).status == 401
+    contexto.close()

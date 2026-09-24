@@ -31,6 +31,8 @@ Nasceu de um problema real e também é um **projeto de portfólio**: o foco nã
 - Pagamentos parciais: a mensagem mostra o **saldo que falta**, não o valor original
 - Painel **"Cobrar agora"** e botão **Cobrar no WhatsApp** com mensagem educada pronta
 - Botões "Testar no celular" e "Enviar alertas de hoje"
+- **Pronto para uso real:** liga sozinho com o Mac, **abre no celular com senha**, vira um ícone
+  na tela inicial e faz **backup diário** do banco (últimos 30 dias)
 
 ## Rodando
 
@@ -42,6 +44,19 @@ python -m fiado           # abra http://localhost:8000
 ```
 
 Os dados ficam em `fiado.db` (SQLite). Documentação interativa da API em `/docs`.
+
+## Instalando na loja (Mac) — 1 comando
+
+```bash
+./scripts/instalar-mac.sh
+```
+
+Prepara tudo, **gera a senha e o canal de avisos**, e configura a Silmodas para **ligar sozinha**
+quando o Mac iniciar. No fim mostra o endereço para abrir no celular (mesmo Wi-Fi) e os 3 passos
+que faltam. Rodar de novo é seguro: nunca troca a senha nem o canal.
+`DRY_RUN=1 ./scripts/instalar-mac.sh` só simula. Para desinstalar: `./scripts/desinstalar-mac.sh`
+(os dados ficam). O guia de uso para a dona da loja está em
+[docs/GUIA-DA-SILMODAS.md](docs/GUIA-DA-SILMODAS.md).
 
 ## Recebendo os alertas no celular (2 minutos, grátis, sem conta)
 
@@ -75,10 +90,13 @@ python -m fiado alerts     # envia os alertas de hoje e sai
 | `FIADO_WARN_DAYS` | `3,1` | Avisar quando faltam X dias (além do dia do vencimento) |
 | `FIADO_TZ` | `America/Sao_Paulo` | Fuso da loja (o "hoje" não depende do servidor) |
 | `FIADO_DB` | `fiado.db` | Arquivo do banco |
+| `FIADO_PASSWORD` | — | Senha do painel. **Obrigatória** para abrir fora deste computador |
+| `FIADO_BACKUP_DIR` | `backups` | Pasta dos backups diários (guarda os últimos 30) |
 
-> **Segurança:** o painel não tem senha e, por padrão, só abre neste computador (`127.0.0.1`).
-> Para abrir no celular na mesma rede: `python -m fiado --host 0.0.0.0`. Não exponha na internet
-> sem antes colocar autenticação (veja "Próximos passos").
+> **Segurança:** por padrão o painel só abre neste computador (`127.0.0.1`). Para abrir no celular
+> use `python -m fiado --host 0.0.0.0` — e o programa **se recusa a subir na rede sem
+> `FIADO_PASSWORD`**, porque o painel mostra quem deve e quanto. A senha protege a rede local; não
+> exponha na internet sem HTTPS (ex.: um túnel como o Tailscale ou Cloudflare Tunnel).
 
 ## Arquitetura
 
@@ -90,7 +108,8 @@ notifier.py    Notifier (Protocol) → NtfyNotifier | LogNotifier
 service.py     casos de uso; envio idempotente de alertas
 repository.py  SQLite (fiados + histórico de alertas enviados)
 settings.py    configuração validada do ambiente
-api.py         FastAPI + ciclo de vida do agendador   __main__.py  CLI
+backup.py      backup diário atômico (últimos 30)
+api.py         FastAPI, senha (HTTP Basic), manifest do app, agendador   __main__.py  CLI
 ```
 
 O `Notifier` é uma interface: trocar ntfy por Telegram ou e-mail é escrever uma classe de ~15
@@ -99,8 +118,8 @@ linhas, sem tocar em regra de negócio.
 ## Estratégia de testes
 
 ```bash
-make test             # 191 testes, ~2s, falha se cobertura < 95% (hoje 100%)
-make e2e              # 29 testes no navegador (Playwright), ~20s
+make test             # 228 testes, ~3s, falha se cobertura < 95% (hoje 100%)
+make e2e              # 31 testes no navegador (Playwright), ~20s
 make lint             # ruff + mypy --strict, o mesmo que o CI roda
 ```
 
@@ -188,7 +207,6 @@ exato, que corretamente passa nos dois casos).
 
 ## Próximos passos
 
-- [ ] Autenticação no painel, caso seja exposto fora da rede local
 - [ ] Teste de mutação (`mutmut`) para medir a qualidade dos testes, não só a cobertura
 - [ ] Segundo canal de alerta (Telegram / e-mail) — basta implementar `Notifier`
 - [ ] Resumo diário único ("3 vencem hoje, total R$ 850") quando houver muitos devedores

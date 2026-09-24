@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import argparse
 import logging
+import socket
 from datetime import date, timedelta
+from pathlib import Path
 
 import uvicorn
 
 from fiado.alerts import TEST_ALERT
+from fiado.backup import make_backup
 from fiado.domain import Debt
 from fiado.notifier import NotifierError, build_notifier
 from fiado.repository import SqliteDebtRepository
@@ -22,9 +25,10 @@ def main(argv: list[str] | None = None) -> int:
         "command",
         nargs="?",
         default="serve",
-        choices=["serve", "alerts", "test", "seed"],
+        choices=["serve", "alerts", "test", "seed", "backup"],
         help="serve: painel + alertas diários (padrão) | alerts: envia os alertas de hoje e sai "
-        "(bom para cron) | test: manda uma notificação de teste | seed: cria dados de exemplo",
+        "(bom para cron) | test: manda uma notificação de teste | seed: cria dados de exemplo | "
+        "backup: salva uma cópia do banco",
     )
     parser.add_argument(
         "--host",
@@ -38,7 +42,13 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings.from_env()
 
     if args.command == "serve":
-        _print_banner(settings)
+        if args.host not in LOOPBACK and not settings.password:
+            print(
+                "Recusado: abrir o painel para a rede exige senha, porque ele mostra quem "
+                "deve e quanto.\nDefina FIADO_PASSWORD no .env (ou use --host 127.0.0.1)."
+            )
+            return 2
+        _print_banner(settings, args.host, args.port)
         uvicorn.run("fiado.api:create_app", factory=True, host=args.host, port=args.port)
         return 0
 
@@ -55,6 +65,11 @@ def main(argv: list[str] | None = None) -> int:
     repo = SqliteDebtRepository(settings.db_path)
     service = DebtService(repo, settings.today)
     try:
+        if args.command == "backup":
+            print(
+                f"Backup salvo em {make_backup(repo, Path(settings.backup_dir), settings.today())}"
+            )
+            return 0
         if args.command == "seed":
             _seed(repo, settings.today())
             print("Dados de exemplo criados.")
@@ -66,7 +81,23 @@ def main(argv: list[str] | None = None) -> int:
         service.close()
 
 
-def _print_banner(settings: Settings) -> None:
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def _lan_ip() -> str | None:
+    """Endereço deste computador na rede local (para abrir o painel no celular)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))  # UDP: não envia nada, só descobre a rota
+            return str(s.getsockname()[0])
+    except OSError:
+        return None
+
+
+def _print_banner(settings: Settings, host: str, port: int) -> None:
+    print(f"Painel neste computador: http://localhost:{port}")
+    if host not in LOOPBACK and (ip := _lan_ip()):
+        print(f"Painel no celular (mesmo Wi-Fi): http://{ip}:{port}  (protegido por senha)")
     if settings.push_enabled:
         print(f"Alertas no celular: ligados (tópico ntfy, todo dia às {settings.alert_time:%H:%M})")
     else:

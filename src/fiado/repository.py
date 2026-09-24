@@ -42,6 +42,15 @@ class SqliteDebtRepository:
         with self._lock:
             self._conn.executescript(_SCHEMA)
 
+    def backup_to(self, dest: str) -> None:
+        """Cópia consistente do banco, mesmo com o app em uso (API de backup do SQLite)."""
+        with self._lock:
+            target = sqlite3.connect(dest)
+            try:
+                self._conn.backup(target)
+            finally:
+                target.close()
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

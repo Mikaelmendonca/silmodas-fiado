@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import logging
+import secrets
+import sqlite3
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import date
@@ -14,10 +18,11 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi import Path as PathParam
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from fiado.alerts import TEST_ALERT
+from fiado.backup import make_backup
 from fiado.domain import (
     Debt,
     DebtNotFound,
@@ -35,6 +40,34 @@ from fiado.settings import Settings
 STATIC_DIR = Path(__file__).parent / "static"
 # SQLite guarda inteiros de até 64 bits: um id maior nunca existe (antes causava erro 500).
 DebtId = Annotated[int, PathParam(ge=1, le=2**63 - 1)]
+# Públicos mesmo com senha: o celular busca ícone e manifest sem credenciais.
+PUBLIC_PATHS = {"/health", "/manifest.webmanifest", "/icon-180.png", "/icon-512.png"}
+MANIFEST = {
+    "name": "Silmodas · Fiado",
+    "short_name": "Silmodas",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#fbf6f8",
+    "theme_color": "#e0457b",
+    "icons": [
+        {"src": "/icon-180.png", "sizes": "180x180", "type": "image/png"},
+        {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    ],
+}
+
+
+def _password_ok(authorization: str | None, password: str) -> bool:
+    """Confere o cabeçalho HTTP Basic. Só a senha importa; o usuário pode ser qualquer um."""
+    if not authorization or not authorization.lower().startswith("basic "):
+        return False
+    try:
+        decoded = base64.b64decode(authorization[6:].strip(), validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    given = decoded.partition(":")[2]
+    return secrets.compare_digest(given.encode(), password.encode())
+
+
 log = logging.getLogger(__name__)
 
 
@@ -96,13 +129,22 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     notifier = notifier or build_notifier(settings)
-    service = DebtService(
-        SqliteDebtRepository(db_path or settings.db_path), today or settings.today
-    )
+    database = db_path or settings.db_path
+    repo = SqliteDebtRepository(database)
+    service = DebtService(repo, today or settings.today)
+    backup_enabled = database != ":memory:"
 
     async def alert_job() -> None:
         report = await asyncio.to_thread(service.send_alerts, notifier, settings.warn_days)
         log.info("Alertas do dia: %d enviados, %d falharam", report.sent, report.failed)
+        if backup_enabled:
+            try:
+                saved = await asyncio.to_thread(
+                    make_backup, repo, Path(settings.backup_dir), service.today()
+                )
+                log.info("Backup salvo em %s", saved)
+            except (OSError, sqlite3.Error):
+                log.exception("Falha ao salvar o backup")  # não pode derrubar o agendador
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -123,6 +165,21 @@ def create_app(
         lifespan=lifespan,
     )
 
+    if settings.password:
+        password = settings.password
+
+        @app.middleware("http")
+        async def require_password(request: Request, call_next):  # type: ignore[no-untyped-def]
+            if request.url.path in PUBLIC_PATHS or _password_ok(
+                request.headers.get("authorization"), password
+            ):
+                return await call_next(request)
+            return Response(
+                "Senha necessária",
+                status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="Silmodas", charset="UTF-8"'},
+            )
+
     @app.exception_handler(ValidationError)
     async def _validation(_: Request, exc: ValidationError) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
@@ -138,6 +195,16 @@ def create_app(
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    def manifest() -> JSONResponse:
+        return JSONResponse(MANIFEST, media_type="application/manifest+json")
+
+    @app.get("/icon-{size}.png", include_in_schema=False)
+    def icon(size: int) -> FileResponse:
+        if size not in (180, 512):
+            raise HTTPException(status_code=404)
+        return FileResponse(STATIC_DIR / f"icon-{size}.png")
 
     @app.get("/health")
     def health() -> dict[str, str]:

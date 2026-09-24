@@ -24,14 +24,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.e2e)
 
 
-@pytest.fixture
-def live_server(notifier) -> Iterator[str]:
-    app = create_app(
-        db_path=":memory:",
-        settings=Settings(ntfy_topic="e2e", timezone=TZ),
-        notifier=notifier,
-        schedule_alerts=False,
-    )
+def _serve(app) -> Iterator[str]:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -46,6 +39,28 @@ def live_server(notifier) -> Iterator[str]:
     yield f"http://127.0.0.1:{port}"
     server.should_exit = True
     thread.join(timeout=5)
+
+
+def _app(notifier, **settings):
+    return create_app(
+        db_path=":memory:",
+        settings=Settings(ntfy_topic="e2e", timezone=TZ, **settings),
+        notifier=notifier,
+        schedule_alerts=False,
+    )
+
+
+@pytest.fixture
+def live_server(notifier) -> Iterator[str]:
+    yield from _serve(_app(notifier))
+
+
+SENHA = "segredo1"
+
+
+@pytest.fixture
+def live_server_protected(notifier) -> Iterator[str]:
+    yield from _serve(_app(notifier, password=SENHA))
 
 
 @pytest.fixture(scope="session")
